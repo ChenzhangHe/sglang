@@ -13,14 +13,14 @@
 | 本计划代码基线 | `ff1285cc28d6b3e0ad19c45e8b14a5966bc95c78`（2026-09-03，`main`） |
 | 计划建立日期 | 2026-09-03（America/Los_Angeles） |
 | 已完成的准备 | fork 已创建；代码已克隆；老师已核对主要目录、入口和案例相关代码 |
-| 最近一课 | 2026-09-03：推理基础问答、batch 性能手推、continuous batching 代码带读；阅读 checkout 为 `b810e3067`，模型代码仍沿用上述基线 |
-| 已确认的学习表现 | 能解释自回归依赖、逐层 KV 缓存及重算恢复；独立算出单请求与 batch 的 100 / 400 token/s，能讨论吞吐与延迟取舍；代码部分为老师给入口带读，尚未独立定位 |
+| 最近一课 | 2026-09-06：沿普通 decode 主线追踪当前 token 的 KV 写入与历史 KV 读取，进入 paged allocation、物理布局和 Radix page 生命周期；阅读 checkout 为 `dca062f5b`，运行时代码仍沿用上述基线 |
+| 已确认的学习表现 | 能解释自回归依赖、逐层 KV 缓存及重算恢复；独立算出单请求与 batch 的 100 / 400 token/s；能手推 decode 新 slot 与长度，区分 `out_cache_loc`、`kv_indices`、`kv_indptr`，并主动追问分页、连续访存、模型相关物理布局与 page 生命周期；代码仍由老师给入口带读，设计题尚待独立完成 |
 | 工作背景与目标 | 学习者自述有推理服务优化、continuous batching 与 profile 阅读经验；关注从请求到达到最后一个 token 返回的完成时间，尤其尾部表现；具体分位数、SLO、配置及 trace 未提供 |
 | 未知项 | Python/异步、PyTorch/张量、完整 Transformer 计算与分布式能力尚未诊断；可用 GPU、环境、每周时间及实际负载长度分布待了解 |
-| 当前阶段 | S0 部分诊断、S1 推理与性能概念已有答题证据；按学习者经验进入 S3 调度入门带读，停在 `ScheduleBatch.prepare_for_decode` 的职责与输入准备；S2 请求输入输出链仍待补，不将 S1/S3 整阶段标为完成 |
-| 下一次课 | 已有历史 KV 后，最新 token 怎样成为下一轮 decode 的输入，并找到正确的 KV？先复述 batch 状态，再精读 `prepare_for_decode` 与调用处，见第 9 节 |
-| 当前练习 | 待无提示复述 `running_batch` 与 `batch_to_run`；手推 `[A,B,C]` 中 A 结束后的请求/长度/索引对应关系，以及输入 `A B`、采样出 `C` 后下一轮的输入与 KV |
-| 实验状态 | 本课为对话问答、纸上算例和静态代码阅读；未安装依赖、加载模型或运行测试/GPU 实验；学习者描述了工作中的 profile 现象，老师尚未查看实际 trace |
+| 当前阶段 | S0 部分诊断、S1 推理与性能概念已有答题证据；已从 S3 的 `prepare_for_decode` 追入 S4/S5 接口，理解普通 decode 的 slot 写入、ragged 读取索引和基础 HBM 地址计算；正进入 paged KV 与 prefix cache 生命周期设计，S2 完整请求链及独立代码定位仍待补 |
+| 下一次课 | 先完成第 9 节的 KV Page Manager 设计题：定义 page/request/prefix metadata、状态转换、共享、回收与容量不足行为；老师随后用 `RadixCache.cache_unfinished_req`、`cache_finished_req` 和 `evict` 对照 |
+| 当前练习 | `page_size=4`、仅 P1–P4：A 使用 P1/P2，B 共享 P1 并产生私有尾页，A 结束后 C 需要 2 或 3 个 pages；独立设计 metadata、状态机、ref count 位置、eviction/retraction 与防 stale reference 不变量 |
+| 实验状态 | 两课均为对话问答、纸上算例和静态代码阅读；已读 scheduler、allocator、memory pool、Triton attention 与 Radix cache 局部实现；未安装依赖、加载模型或运行测试/GPU 实验，连续性与访存收益仍是待测判断 |
 
 老师准备材料 ≠ 学习者已掌握；文档写好 ≠ 课程已完成。不要预填掌握率，也不要根据本机路径推断 GPU 条件。
 
@@ -342,8 +342,8 @@ gh pr view 35915 --repo sgl-project/sglang
 | 请求解析、返回与异步边界 | 未评估 | 尚未展开 HTTP、模板、tokenizer/IPC、detokenizer 链 / — | S2 待补 |
 | 调度与批次 | 学习中 | 2026-09-03：能提出请求调度、在 forward 轮次间安排工作的思路；老师带读接纳/合并/过滤，`running_batch` 与 `batch_to_run` 经追问后讲解；尚无独立定位或闭卷复述 | S3：复述三种状态，手推成员与元数据变化，再读 `prepare_for_decode` |
 | KV 缓存作用与重算取舍 | 能解释 | 2026-09-03：仅给问题即指出各层 KV 需要保留，缓存丢弃后可重新 prefill 恢复；重算包含原始输入与已生成 token 的细节由老师补充 | 无提示复述恢复上下文；S4 再做容量与资源生命周期练习 |
-| Prefix cache 与物理内存管理 | 未评估 | 只介绍接纳预算、撤回重排队和结束后的资源处理，未读 prefix 共享、allocator 实现 / — | S4；不由 KV 概念答对推断实现能力 |
-| 模型执行与 attention 接口 | 学习中 | 2026-09-03：刚听讲常驻共享权重、最新 token、位置/长度、KV 索引和新增 KV 空间；已定位 `prepare_for_decode`，尚未逐段精读或追入模型 forward / — | 下次先补批次准备接口；模型各层留到 S5 |
+| Prefix cache 与物理内存管理 | 学习中 | 2026-09-06：能区分 paged allocation 与 Radix prefix reuse，理解尾页专有、完整不可变 prefix page 可共享，并主动提出 reference count、page 状态转换和回收问题；状态机答案尚未作答，代码为老师带读 | 下次先独立完成 Page Manager 设计题，再对照 `cache_unfinished_req` / `cache_finished_req` / `evict` |
+| 模型执行与 attention 接口 | 学习中 | 2026-09-06：共同追踪 `prepare_for_decode → ForwardBatch → Triton backend → decode kernel`；学习者能解释刚采样 token 在下一轮生成当前层 Q/K/V，正确手推 `[42,55]` 与 `seq_lens=[4,3]`，经纠正后区分 flattened `kv_indices` 和边界 `kv_indptr`；尚未独立追代码或运行 kernel | 闭卷画一次 write/read 双路径，再精读一个 kernel 地址计算块 |
 | 性能测量、overlap、kernel | 未评估（实测） | 学习者自述工作中见到 decode/prefill 交替；本课未提供 trace、未进行 benchmark / — | S6；将 profile 假设与真实测量分开 |
 | 分布式与 PD | 未评估 | 无实验 / — | S7；进入专题后拆分记录 |
 | 推测解码与 hybrid 状态 | 未评估 | 无专题实践 / — | S8 A |
@@ -365,6 +365,15 @@ gh pr view 35915 --repo sgl-project/sglang
 - **澄清与待复述**：长输入与长输出影响不同阶段；batch 的吞吐提升不等于单请求逐 token 更快，排队改变最终完成时间；`running_batch` 保存持续解码集合，`batch_to_run` 是本轮任务；过滤请求时必须同步长度与索引；刚采样出的 token 要在下一轮被处理后才产生自己的 KV。后面三项主要为老师讲解，需下次无提示复述。
 - **性能支线与边界**：查到 `prefill_decode_interval`、`PrefillDelayer` 的可选等待逻辑，并介绍 chunked prefill 动机；未逐段精读全部实现。学习者关注请求到达到最后 token 的完成时间尾部，报告 profile 有 decode/prefill 交替；“prefill 阻塞 decode 推高尾部”只是假设，未看 trace，未确认瓶颈或调优收益。教学选择普通生成、prefill/decode 分开执行；不将 `event_loop_normal` 当成全部配置的默认路径。
 - **停点与路线调整**：按学习者已有经验进入 S3 的引导阅读，S2 仍未完成；停在 `ScheduleBatch.prepare_for_decode` 的职责和输入概念，不提前记为模型执行阶段完成。下次先复述状态与 token/KV 关系，再追下一轮输入，详见第 9 节。
+
+### 2026-09-06 · 第 2 次对话课：从 decode slot 到 page 生命周期
+
+- **基线与证据类型**：checkout `dca062f5b`，运行时代码基线仍为 `ff1285cc28d6b3e0ad19c45e8b14a5966bc95c78`。本课是纸上手推与静态带读；未运行模型、测试或 GPU profiler。
+- **普通 decode 主线**：共同追踪 `schedule_batch.py::prepare_for_decode` / `allocation.py::alloc_for_decode` → `forward_batch_info.py::ForwardBatch.init_new` → `triton_backend.py::forward_decode` → `kernels/ops/attention/decode_attention.py`。本轮输入是上一轮采样 token；各层只为本轮输入生成 Q/K/V。`out_cache_loc` 走写路径保存当前 K/V，同时已写入 `req_to_token`，再被 metadata 构造成包含当前 token 的 `kv_indices` 供读路径使用。
+- **学习者回答与纠正**：给定两个请求，学习者正确填出新增 slots `42/55` 和新长度 `[4,3]`；最初把每请求的嵌套 slot 列表称为 `kv_indptr`，经提示后确认 `kv_indices` 才是扁平 slot 流，`kv_indptr=[0,4,7]` 记录 ragged request 边界。理解普通 decode 的 `out_cache_loc` 通常为 `[n_req]`，extend/multi-token 情形按新 token 扁平化，后者尚未深入。
+- **物理布局判断**：共同阅读 `memory_pool.py::MHATokenToKVPool` 与 Triton 地址计算。学习者理解 `loc` 是跨各层 K/V buffer 使用的 slot id，不是裸 HBM 指针；模型层数、本地 KV heads、head dimension、dtype/量化、并行与布局决定每 slot 字节数、stride 和总容量。普通静态 pool 可直接以 loc 索引；统一 pool 还可经 virtual-to-physical 翻译。连续 slot 有潜在访存收益，但同一请求跨轮 decode 天然可能分散，实际收益待测。
+- **Paged KV 与 Radix 初步**：理解尾页有空间时复用 `last_loc+1`，溢出时填满尾页再申请新 page；无关请求不混写同一 partial page，完整不可变 prefix page 可以被多个请求共同引用。大 page 减少 metadata/跳转但增加内部碎片和粗粒度回收；小 page 相反。Radix 被定位为 prefix 索引、共享、保护与 eviction 的组合，不只是一套 allocator。
+- **停点**：学习者要求先自行设计再看实现。题设为 `page_size=4`、P1–P4，覆盖 private writable、shared protected、cached evictable、容量不足和 stale reference；尚未作答，因此不记录为掌握 page 状态机。下次从设计的 metadata、引用位置与不变量开始，再对照 SGLang。
 
 ### 每次课的追加记录模板
 
@@ -401,14 +410,13 @@ gh pr view 35915 --repo sgl-project/sglang
 
 ## 9. 下一次课的具体教案
 
-**题目：已有历史 KV 后，下一轮 decode 还需要准备什么？**
+**题目：如果从零设计 KV Page Manager，page 应该如何共享、保护和回收？**
 
-- **起点与边界**：接上 `ScheduleBatch.prepare_for_decode`，属于 S3 的批次准备及通往 S5 的接口预览，尚未进入模型各层 forward。普通自回归、无推测解码、prefill/decode 分开执行；需要时说明真实配置分支，不把简化路径冒充全部行为。S2 与 S4 的未读部分仍需补齐。
-- **先无提示复述**：A、B 正在 decode，C 被选去 prefill 时，`running_batch` 与 `batch_to_run` 分别是什么？若 A 结束，`[A,B,C]` 对应的请求、长度与槽位索引怎样一起过滤？答不清就先回看上课片段。
-- **本课唯一核心问题**：输入 token `A B` 经 prefill 后采样出 `C`，下一轮输入是什么、历史 KV 覆盖哪些位置、本轮又新增什么？强调字母只是 token 的代号，权重通常已加载并共享，最新 token 的 KV 尚待计算。
-- **阅读入口（最多两个函数）**：`python/sglang/srt/managers/schedule_batch.py::ScheduleBatch.prepare_for_decode` 与 `python/sglang/srt/managers/scheduler.py::Scheduler.run_batch`。先区分 `input_ids`、`req_pool_indices`、`seq_lens`、`out_cache_loc`，再核对最新 token 在当前版本真实的数据传递路径；不能仅凭旧注释认定它总在某个函数直接赋值。
-- **纸上练习与验收**：给出两个不同上下文长度的请求，画一轮输入、KV 读取索引、新增 KV 写入位置和结果归属。能解释为什么 batch 位置变化不能打乱请求/KV 对应关系，并自己指出准备与执行的边界。`alloc_for_decode` 先视作分配接口，不同时深挖 allocator 或 attention kernel。
-- **后续桥接**：本课复述通过后，补请求输入输出链和必要的 KV 索引/生命周期知识，再沿 worker / ModelRunner 进入真正的模型 forward。prefill/decode 参数调优、overlap、PD、推测解码与真实 tail latency 实验留在对应阶段，不在这节铺开。
+- **先由学习者作答**：`page_size=4`，只有 P1–P4。A 使用 P1/P2；B 与 A 共享前 4 token 的 P1，再生成两个新 token；A 结束；C 需要 2 个 pages，变化题为需要 3 个 pages。学习者先定义 request/page/prefix node metadata，逐步标出状态，并决定 ref count 放在哪里。
+- **必须守住的不变量**：活跃请求可达的 KV 不被覆盖；相同 prefix 尽量保留一份；无活跃引用的 KV 能在内存压力下安全回收；page 重用后不存在 stale reference。先讨论正确性，再讨论命中率、碎片、metadata 和调度代价。
+- **老师暂不展示的对照入口**：作答后依次读 `python/sglang/srt/mem_cache/radix_cache.py::cache_unfinished_req`、`cache_finished_req`、`inc_lock_ref` / `dec_lock_ref`、`evict`，以及 `allocator/paged.py::free_segment`。比较学习者设计与现有实现，不以函数名替代设计理由。
+- **验收**：能画出 `FREE → PRIVATE_WRITABLE → RADIX_PROTECTED ↔ RADIX_EVICTABLE → FREE` 的有条件转换；说明 partial tail、完整 prefix page、共享 canonical copy 和 eviction leaf 的区别；在 C 需要 3 pages 且只有活跃页时给出 scheduler 层行为。
+- **后续**：状态机通过后回到真实调用时机，核对 unfinished/finished request 如何把 page-aligned KV 插树、释放重复副本和未对齐尾页。更换 eviction policy、HiCache 与多 token decode 留到基础状态机稳定后。
 
 ## 10. 维护记录
 
@@ -420,3 +428,4 @@ gh pr view 35915 --repo sgl-project/sglang
 - 本次增补复核：独立 subagent 确认来源归属、递进安排和数值例子合理；已按建议区分 S8 各专题证据，补充 S6 的统计前置，并统一容量/时间估算的学习时机。
 
 - 2026-09-03：根据第 1 次对话课更新当前状态、逐项能力证据、课堂记录、停车区和下一课教案；区分独立回答与老师示范，保留 S2/S4 等未读项，停点设为 `prepare_for_decode`。本次仅维护学习文档，未改动运行时代码、未进行性能验证。
+- 2026-09-06：记录第 2 次对话课：完成普通 decode KV 写/读索引链的静态带读，进入物理 KV pool、paged allocation 与 Radix 生命周期；保留 `kv_indptr` 的已纠正误区、未实测边界和学习者尚未作答的 Page Manager 设计题。运行时代码未修改。
