@@ -13,14 +13,14 @@
 | 本计划代码基线 | `ff1285cc28d6b3e0ad19c45e8b14a5966bc95c78`（2026-09-03，`main`） |
 | 计划建立日期 | 2026-09-03（America/Los_Angeles） |
 | 已完成的准备 | fork 已创建；代码已克隆；老师已核对主要目录、入口和案例相关代码 |
-| 最近一课 | 2026-09-06：完成 KV Page Manager 纸上设计并对照 SGLang 的 request row、KV slot、Radix node 与引用生命周期；追踪 `req_generation` 的真实用途，并以 DSpark confidence relay 理解 overlap 中的延迟数据保护；阅读 checkout 为 `689496c36` |
-| 已确认的学习表现 | 能解释自回归依赖、逐层 KV 缓存及重算恢复；能手推 decode slot 与 ragged 索引；能从零提出 FREE / private mutable / immutable shared 的 page 状态，正确区分 request row、KV slot 与 Radix node ownership，并判断 request row 可释放而被 Radix node 引用的 KV 不可释放；理解 `(req_pool_idx, req_generation)` 是 row 占用代次、不是 KV page 版本；能解释 confidence、动态 verify budget 与 overlap overshoot 的基本动机。代码定位仍主要由老师给入口，尚未独立追完真实 prefix 生命周期 |
+| 最近一课 | 2026-09-08：用 A/B 共享前缀算例完成普通 KV/Radix 生命周期的概念闭环；解释 prefix 命中、私有尾部、`lock_ref`、完成后入树、request row 释放与 eviction，并讨论单线程 scheduler 如何消除“命中后、保护前被驱逐”的竞态；同时理解 zero-overhead CPU scheduler 是把 CPU 工作移出 GPU 关键路径的运行目标。阅读 checkout 为 `eae7c291f` |
+| 已确认的学习表现 | 能解释自回归依赖、逐层 KV 缓存及重算恢复；能手推 decode slot 与 ragged 索引；能从零提出 FREE / private mutable / immutable shared 的 page 状态，正确区分 request row、KV slot 与 Radix node ownership。能用 A/B 算例说明共享 slots 与私有 slots 如何进入 request row、私有尾部完成后如何插入 Radix tree、row 为什么可以释放、`lock_ref == 0` 为什么只表示可 eviction；能解释 scheduler 串行修改缓存状态的正确性价值。理解 `(req_pool_idx, req_generation)` 是 row 占用代次、不是 KV page 版本；能解释 confidence、动态 verify budget、overlap overshoot，以及“zero overhead”为什么不是 CPU 不做工作。代码定位仍主要由老师给入口，尚未独立完成端到端调用链追踪 |
 | 工作背景与目标 | 学习者自述有推理服务优化、continuous batching 与 profile 阅读经验；关注从请求到达到最后一个 token 返回的完成时间，尤其尾部表现；具体分位数、SLO、配置及 trace 未提供 |
 | 未知项 | Python/异步、PyTorch/张量、完整 Transformer 计算与分布式能力尚未诊断；可用 GPU、环境、每周时间及实际负载长度分布待了解 |
-| 当前阶段 | S4 KV 生命周期学习中：纸上 page 状态机、request row reuse 与 Radix 引用边界已有解释证据；`req_generation` 与 overlap/speculative confidence 是本课支线。下一步回到普通请求主线，逐函数核对 prefix match → private KV allocation → lock_ref → finished cache transfer → eviction；S2 完整请求链与独立代码定位仍待补 |
-| 下一次课 | 用 A=`[10,20,30,40]`、B=`[10,20,50,60]` 追踪真实普通请求生命周期：`match_prefix` 返回什么、共享 KV 如何进入 request row、私有尾部如何分配、`lock_ref` 如何变化、完成时哪些 KV 入树/释放，最后看 eviction |
-| 当前练习 | 下一课先画两张表：① A/B 每一步的 `req_pool_idx → token position → kv_slot`；② Radix node 的 prefix、KV values、`lock_ref` 与可 eviction 状态。先预测每个函数前后状态，再读实现核对 |
-| 实验状态 | 三课均为对话问答、纸上算例和静态代码阅读；已读 scheduler、allocator、memory pool、Triton attention 与 Radix cache 局部实现；未安装依赖、加载模型或运行测试/GPU 实验，连续性与访存收益仍是待测判断 |
+| 当前阶段 | S4 第一轮概念验收完成：能解释 request row、KV slot、Radix node 与 `lock_ref` 的完整生命周期及单线程正确性边界；实现级独立定位仍学习中。主线进入 S5，把已理解的 KV 索引连接到 `ScheduleBatch → ForwardBatch → ModelRunner → attention backend`；S2 完整请求链仍待补 |
+| 下一次课 | 解释 `ScheduleBatch` 如何变成 `ForwardBatch`：选择普通 decode 的两个请求，逐字段追踪 `input_ids`、`positions`、`out_cache_loc`、`req_pool_indices`、`seq_lens`，再说明这些 metadata 如何驱动 attention 的 KV 写入与历史 KV 读取 |
+| 当前练习 | 先预测一个双请求 decode batch 的 `ForwardBatch` 关键字段及 shape，再从 `TpModelWorker.forward_batch_generation` 和 `ForwardBatch.init_new` 核对；最终闭卷画出当前 token 的 KV write path 与完整历史的 KV read path |
+| 实验状态 | 四课均为对话问答、纸上算例和静态代码阅读；已读 scheduler、allocator、memory pool、Triton attention 与 Radix cache 局部实现；未安装依赖、加载模型或运行测试/GPU 实验，生命周期结论已有静态证据，连续性、访存与 overlap 收益仍待实测 |
 
 老师准备材料 ≠ 学习者已掌握；文档写好 ≠ 课程已完成。不要预填掌握率，也不要根据本机路径推断 GPU 条件。
 
@@ -60,6 +60,16 @@
 这些材料由老师按课选段使用；不要求先读完论文再开始代码课。下面的问题与例子是为本课程制定的操作方法。
 
 ### 2.2 读 SGLang 的顺序：带着可检验的问题深入
+
+> **后续老师与 agent 的统一阅读框架**：分析任何 SGLang 组件、优化或 issue 时，先回答下面五个问题。结论必须写明适用的 workload、关键状态与失效边界，不能只复述函数行为或功能名称。
+
+1. **这个 workload 中，什么工作被重复了？** 哪些计算、数据准备或通信可以复用或消除？
+2. **GPU 为什么可能空闲？** 等待发生在 CPU 调度、数据依赖、内存分配、kernel launch、同步还是通信？
+3. **真正稀缺的资源是什么？** 是计算、HBM/KV 容量、内存带宽、互连带宽、CPU 时间还是延迟预算？
+4. **哪些状态必须由唯一线程或组件拥有？** 谁创建、引用、修改和释放它？必须保持哪些不变量？
+5. **在什么 workload 或规模下，这项设计会失效？** 哪个假设会先被打破，应该用什么指标或实验发现它？
+
+这五问用于形成第一版系统判断；随后再沿调用链读最少的代码，并用 trace、状态检查、容量估算或 benchmark 修正判断。
 
 第一遍建立全景，只做职责图。之后按以下循环选择本课的 1–3 个函数；无需把整个仓库从头到尾读完。
 
@@ -342,9 +352,9 @@ gh pr view 35915 --repo sgl-project/sglang
 | 请求解析、返回与异步边界 | 未评估 | 尚未展开 HTTP、模板、tokenizer/IPC、detokenizer 链 / — | S2 待补 |
 | 调度与批次 | 学习中 | 2026-09-03：能提出请求调度、在 forward 轮次间安排工作的思路；老师带读接纳/合并/过滤，`running_batch` 与 `batch_to_run` 经追问后讲解；尚无独立定位或闭卷复述 | S3：复述三种状态，手推成员与元数据变化，再读 `prepare_for_decode` |
 | KV 缓存作用与重算取舍 | 能解释 | 2026-09-03：仅给问题即指出各层 KV 需要保留，缓存丢弃后可重新 prefill 恢复；重算包含原始输入与已生成 token 的细节由老师补充 | 无提示复述恢复上下文；S4 再做容量与资源生命周期练习 |
-| Prefix cache 与物理内存管理 | 能解释（设计层）；实现学习中 | 2026-09-06：独立提出 FREE / private mutable / immutable shared 状态，区分 shared in-use 与 cached not-in-use；正确判断 `lock_ref` 下降后私有尾部可释放、Radix node 持有的共享 page 不可释放、request row 可独立释放。经代码核对确认普通 KV page allocator没有 per-page generation | 用 A/B 共享前缀例子追完 `match_prefix`、`inc/dec_lock_ref`、`cache_finished_req` 与 `evict`，验证纸上状态机与实现的差异 |
+| Prefix cache 与物理内存管理 | 能解释；实现定位学习中 | 2026-09-08：用 A/B 共享前缀算例解释 prefix slots、私有尾部 slots、request row、Radix insertion、`lock_ref` 和 eviction 的状态变化；指出命中后需要立即保护，并理解单线程 scheduler 串行化相关状态操作。经代码核对确认普通 KV page allocator 没有 per-page generation | 后续遇到真实 cache issue 时独立定位 `match_prefix`、`inc/dec_lock_ref`、`cache_finished_req` 与 `evict`；不重复概念题 |
 | 模型执行与 attention 接口 | 学习中 | 2026-09-06：共同追踪 `prepare_for_decode → ForwardBatch → Triton backend → decode kernel`；学习者能解释刚采样 token 在下一轮生成当前层 Q/K/V，正确手推 `[42,55]` 与 `seq_lens=[4,3]`，经纠正后区分 flattened `kv_indices` 和边界 `kv_indptr`；尚未独立追代码或运行 kernel | 闭卷画一次 write/read 双路径，再精读一个 kernel 地址计算块 |
-| 性能测量、overlap、kernel | 能解释 overlap 基本流水线；实测未评估 | 2026-09-06：理解 CPU 尚未消费 GPU token/结束状态时可通过 device-side relay 启动下一轮，因此 finished request 可能出现一次 overshoot；能说明减少 GPU 空泡与少量重复计算的取舍。未提供 trace、未运行 benchmark | S6 用真实时间线核对 D2H、CPU result processing、下一轮 forward 与同步事件 |
+| 性能测量、overlap、kernel | 能解释 overlap 基本流水线；实测未评估 | 2026-09-08：理解 zero-overhead scheduler 不是消除 CPU 调度，而是让 CPU 提前准备下一批、把开销隐藏在当前 GPU 工作后；能判断 CPU 准备时间超过可重叠窗口时 GPU 空泡会重新出现。此前已解释 device-side relay、结束状态延迟与一次 overshoot。未提供 trace、未运行 benchmark | S6 用真实时间线和 profiler 核对 D2H、CPU result processing、下一轮 forward、同步事件及 GPU 空泡 |
 | 分布式与 PD | 未评估 | 无实验 / — | S7；进入专题后拆分记录 |
 | 推测解码与 hybrid 状态 | 能解释基础动机；非主线 | 2026-09-06：理解 draft 先给出候选后，target 可在一次 forward 中并行验证多个 token；能解释历史 confidence、累计 survival 与动态 verify budget 的关系，以及 relay 未就绪时 fallback。未读接受/拒绝与 rollback 主路径 | 暂停深入，S8 A 再系统学习；本阶段只保留与 `req_generation` 有关的 confidence relay 证据 |
 | MoE / expert parallelism | 未评估 | 无专题实践 / — | S8 B |
@@ -383,6 +393,14 @@ gh pr view 35915 --repo sgl-project/sglang
 - **overlap 与 speculative 支线**：学习者理解 CPU 未读回并提交第 N 轮结束状态时，device-side FutureMap 可让 GPU 启动第 N+1 轮，代价是 finished request 可能多算一次；也理解 speculative decoding 的收益来自一次 target forward 并行验证多个已知 draft token，而非单 token verify 比单次 decode 更便宜。动态 budget 用历史 confidence 的累计 survival 与 GPU cost/SPS 表选择额外 verify token 数。
 - **边界与下一步**：本课为静态阅读和教学算例，没有运行模型、测试或 profiler；speculative decoding 暂停深入。下一课回到普通 KV/Radix 主线，用 A=`[10,20,30,40]` 与 B=`[10,20,50,60]` 逐步核对 prefix match、KV allocation、`lock_ref`、finished cache transfer 与 eviction。
 
+### 2026-09-08 · 第 4 次对话课：Radix 生命周期闭环与 SGLang 设计原则
+
+- **普通 KV/Radix 生命周期证据**：学习者用 B 命中 `[101,102]`、新分配 `[201,202]` 的算例，解释共享 prefix 与私有尾部如何进入 request row；B 完成后新 KV 插入 Radix tree、request row 释放，旧路径解除保护，只有 `lock_ref == 0` 的节点才进入可 eviction 集合。
+- **正确性边界**：学习者主动提出“prefix 已命中但尚未使用时被 eviction”的竞态，并接受命中路径需要同步增加保护引用；进一步判断单线程 scheduler 适合串行处理 request-level 缓存状态，避免在 lookup 与 pin 之间发生并发驱逐。这里是概念和静态实现判断，尚未做并发或故障实验。
+- **所有权表述精化**：request row 保存 token position 到 KV slot 的索引，物理 K/V 数据位于 KV pool；私有尾部插入缓存后 Radix node 也保存对相应 slots 的索引。“B 持有 201/202”仅是便于推演的简称。
+- **设计原则**：理解 zero-overhead CPU scheduler 的目标是通过 CPU/GPU overlap 把调度移出 GPU 关键路径，而非让 CPU 不执行工作；CPU 准备超过重叠窗口时该性质会失效。新增五问作为后续老师与 agent 分析所有组件和 issue 的统一框架。
+- **等级与下一步**：S4 第一轮从“设计层学习中”提升为“能解释；实现定位学习中”。不再重复 A/B 生命周期概念题；主线进入 S5，追踪 `ScheduleBatch → ForwardBatch → ModelRunner → attention backend` 的真实字段和 shape。
+
 ### 每次课的追加记录模板
 
 日常只更新第 1 节当前状态、发生变化的能力行，再追加 3–6 行短记录（日期/commit、问题、自己的回答与提示等级、证据、误区、下一步）。下方完整模板用于复杂课或实验，不强制每课填满。第 1 节是唯一进度入口，第 9 节是随之更新的教案，开课前检查二者一致。
@@ -418,15 +436,15 @@ gh pr view 35915 --repo sgl-project/sglang
 
 ## 9. 下一次课的具体教案
 
-**题目：一个普通 request 的 KV 如何从 prefix match 走到 Radix cache ownership？**
+**题目：`ScheduleBatch` 怎样变成一次模型 forward？**
 
-- **统一例子**：A=`[10,20,30,40]` 先到达并完成；B=`[10,20,50,60]` 后到达。先不引入 speculative、offload、HiCache、Mamba 或 session，只看普通 paged KV 与 Radix Cache。
-- **第一步：prefix match**：先预测 B 查询 `[10,20,50,60]` 后 `prefix_indices`、`last_node` 和 `cache_protected_len` 应是什么，再读 `Req.init_next_round_input` 与 `radix_cache.py::match_prefix`。
-- **第二步：request row 与私有 KV**：画出 A/B 的 `req_pool_idx`，把 `req_to_token[row, token_position] → kv_slot` 填完整；核对 `ScheduleBatch.prepare_for_extend` 及 allocator 如何只为未命中部分申请 KV。
-- **第三步：active reference**：逐次记录 `inc_lock_ref` / `dec_lock_ref` 前后哪些 Radix nodes 是 protected、哪些是 evictable，并说明 node 引用和 request row ownership 为什么不能合成一个 ref count。
-- **第四步：完成与所有权转移**：从 `release_kv_cache` 进入 `cache_finished_req`，区分插入 Radix 的 canonical KV、重复副本、未对齐尾部和 overallocated tail；确认 request row 何时回到 free list。
-- **第五步：内存压力**：读取 `evict`，用“B 仍在使用共享 prefix”和“所有 request 都已结束”两个时刻判断哪些 leaf 可以回收、哪些 KV slots 回到 allocator。
-- **验收**：闭卷解释 A 结束后 row 为什么可复用、共享 KV 为什么仍可保留；B 到达后哪些状态从 cached evictable 变为 active protected；若 prefix 不匹配，从哪一步开始与共享路径分叉。最后指出至少一个纸上 Page Manager 与 SGLang 当前实现的差异。
+- **统一例子**：两个普通 decode 请求都已拥有历史 KV，本轮各输入一个刚采样 token。沿单 worker 的 dense 模型路径学习，不引入 speculative、PD、MoE 或 CUDA graph。
+- **第一步：定义成功条件**：预测 batch size 为 2 时 `input_ids`、`positions`、`out_cache_loc`、`req_pool_indices`、`seq_lens` 的含义、长度与相互约束；明确哪个字段标识 request row，哪个字段标识 KV slot。
+- **第二步：跨越 scheduler/worker 边界**：从 `TpModelWorker.forward_batch_generation` 进入 `ForwardBatch.init_new`，只追本例用到的字段，画出 Python request 状态到设备 tensor metadata 的转换。
+- **第三步：进入 ModelRunner**：阅读 `ModelRunner.forward` 的委托边界，找出模型收到的 token/position 与 attention backend 收到的 cache metadata；暂不展开模型加载和所有 runner 分支。
+- **第四步：KV 写入与读取**：把 `out_cache_loc` 标在当前 token 的 K/V write path，把 `req_to_token → kv_indices/kv_indptr` 标在完整历史的 read path，解释二者为什么不能混为一个索引。
+- **第五步：用统一五问复盘**：本轮避免了什么重复工作、GPU 可能在哪里等待、稀缺资源是什么、谁拥有 batch/KV 状态、在哪种 batch 或 layout 下当前判断失效。
+- **验收**：闭卷画出 `ScheduleBatch → ForwardBatch → ModelRunner → attention backend`，为每条箭头写出至少一个真实字段；给定两个请求的 row、slot 和 sequence length，正确写出关键 tensor 的 shape，并解释一次当前 token KV 写入和历史 KV 读取。
 
 ## 10. 维护记录
 
@@ -440,3 +458,4 @@ gh pr view 35915 --repo sgl-project/sglang
 - 2026-09-03：根据第 1 次对话课更新当前状态、逐项能力证据、课堂记录、停车区和下一课教案；区分独立回答与老师示范，保留 S2/S4 等未读项，停点设为 `prepare_for_decode`。本次仅维护学习文档，未改动运行时代码、未进行性能验证。
 - 2026-09-06：记录第 2 次对话课：完成普通 decode KV 写/读索引链的静态带读，进入物理 KV pool、paged allocation 与 Radix 生命周期；保留 `kv_indptr` 的已纠正误区、未实测边界和学习者尚未作答的 Page Manager 设计题。运行时代码未修改。
 - 2026-09-06：记录第 3 次对话课：完成 Page ownership 纸上设计，澄清 `rid` / `req_pool_idx` / KV slot 与 `req_generation` 边界；静态追踪 DSpark confidence ring、fallback 与 overlap overshoot，作为理解 generation 的支线。下一课回到普通 Radix 生命周期，按 prefix match → allocation → lock → finished cache transfer → eviction 推进。运行时代码未修改。
+- 2026-09-08：记录第 4 次对话课：完成普通 Radix 生命周期的概念验收，补充 lookup 后保护与单线程 scheduler 的正确性讨论；理解 zero-overhead scheduler 的适用条件，并增加五问作为后续 agent 的统一阅读框架。下一课转入 S5 的 `ScheduleBatch → ForwardBatch → ModelRunner → attention backend`。运行时代码未修改。
